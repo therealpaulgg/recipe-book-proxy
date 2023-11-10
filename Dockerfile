@@ -1,4 +1,4 @@
-FROM golang:1.19-alpine AS builder
+FROM golang:1.21-alpine AS builder
 ENV GOOS=linux
 ENV GOARCH=amd64
 ENV CGO_ENABLED=0
