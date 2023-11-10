@@ -78,6 +78,14 @@ func getNutrition(i *do.Injector) http.HandlerFunc {
 			if err != nil || res.StatusCode != http.StatusOK {
 				log.Err(err).Msg("Error getting value from nutritionix")
 				w.WriteHeader(http.StatusFailedDependency)
+				if err == nil {
+					apiBody, err := io.ReadAll(res.Body)
+					if err != nil {
+						log.Err(err).Msg("Error reading response body")
+						return
+					}
+					w.Write(apiBody)
+				}
 				return
 			}
 			// save res body to redis, then send to client
@@ -94,7 +102,7 @@ func getNutrition(i *do.Injector) http.HandlerFunc {
 				return
 			}
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(apiBody))
+			w.Write(apiBody)
 		} else {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(val))
