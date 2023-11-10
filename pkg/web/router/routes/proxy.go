@@ -110,8 +110,88 @@ func getNutrition(i *do.Injector) http.HandlerFunc {
 	}
 }
 
+func getItem(i *do.Injector) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// extract the following query params: nix_item_id, upc, rw_sin, claims, taxonomy
+
+		url := url.URL{}
+		url.Scheme = "https"
+		url.Host = "trackapi.nutritionix.com"
+		url.Path = "/v2/search/item"
+		queryVals := url.Query()
+		if nixItemId := r.URL.Query().Get("nix_item_id"); nixItemId != "" {
+			queryVals.Add("nix_item_id", nixItemId)
+		}
+		if upc := r.URL.Query().Get("upc"); upc != "" {
+			queryVals.Add("upc", upc)
+		}
+		if rwSin := r.URL.Query().Get("rw_sin"); rwSin != "" {
+			queryVals.Add("rw_sin", rwSin)
+		}
+		if claims := r.URL.Query().Get("claims"); claims != "" {
+			queryVals.Add("claims", claims)
+		}
+		if taxonomy := r.URL.Query().Get("taxonomy"); taxonomy != "" {
+			queryVals.Add("taxonomy", taxonomy)
+		}
+		url.RawQuery = queryVals.Encode()
+		hash := sha256.Sum256([]byte(url.String()))
+		redisClient := do.MustInvoke[*redis.Client](i)
+		val, err := redisClient.Get(context.TODO(), string(hash[:])).Result()
+		if err != nil && err != redis.Nil {
+			log.Err(err).Msg("Error getting value from redis")
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		} else if err == redis.Nil {
+			headers := http.Header{}
+			headers.Add("Content-Type", "application/json")
+			headers.Add("x-app-id", os.Getenv("NUTRITIONIX_APP_ID"))
+			headers.Add("x-app-key", os.Getenv("NUTRITIONIX_APP_KEY"))
+			newReq := &http.Request{
+				Method: "GET",
+				Header: headers,
+				URL:    &url,
+			}
+			client := http.DefaultClient
+			res, err := client.Do(newReq)
+			if err != nil || res.StatusCode != http.StatusOK {
+				log.Err(err).Msg("Error getting value from nutritionix")
+				w.WriteHeader(http.StatusFailedDependency)
+				if err == nil {
+					apiBody, err := io.ReadAll(res.Body)
+					if err != nil {
+						log.Err(err).Msg("Error reading response body")
+						return
+					}
+					w.Write(apiBody)
+				}
+				return
+			}
+			// save res body to redis, then send to client
+			apiBody, err := io.ReadAll(res.Body)
+			if err != nil {
+				log.Err(err).Msg("Error reading response body")
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			_, err = redisClient.Set(context.TODO(), string(hash[:]), string(apiBody), 0).Result()
+			if err != nil {
+				log.Err(err).Msg("Error setting value in redis")
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			w.Write(apiBody)
+		} else {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(val))
+		}
+	}
+}
+
 func ProxyRoutes(i *do.Injector) chi.Router {
 	r := chi.NewRouter()
 	r.Post("/nutrition", getNutrition(i))
+	r.Get("/item", getItem(i))
 	return r
 }
