@@ -10,7 +10,7 @@ import (
 func NewRedisClient(i *do.Injector) (*redis.Client, error) {
 	return redis.NewClient(&redis.Options{
 		Addr:     os.Getenv("REDIS_CLIENT"),
-		Password: "",
-		DB: 0,
+		Password: os.Getenv("REDIS_PASSWORD"),
+		DB:       0,
 	}), nil
 }
